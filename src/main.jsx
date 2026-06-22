@@ -270,9 +270,10 @@ function RichEditor({ text, charCount, toast }) {
     const canvas = await html2canvas(editorRef.current, { backgroundColor: '#fafff8', scale: 2 });
     const img = canvas.toDataURL('image/jpeg', 0.95);
     const width = 595.28;
-    const height = Math.max(841.89, (canvas.height * width) / canvas.width);
-    const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: [width, height] });
-    pdf.addImage(img, 'JPEG', 0, 0, width, height);
+    const imgHeight = (canvas.height * width) / canvas.width;
+    const pageHeight = Math.max(841.89, imgHeight);
+    const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: [width, pageHeight] });
+    pdf.addImage(img, 'JPEG', 0, 0, width, imgHeight);
     pdf.save(`点词成文_${Date.now()}.pdf`);
   }
 
