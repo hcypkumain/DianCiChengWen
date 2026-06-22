@@ -45,9 +45,8 @@ export const EXPAND_OPTIONS = [
 ];
 
 export const MODEL_OPTIONS = [
-  { label: '平衡版', value: 'glm-4', desc: '速度与质量均衡，适合日常使用' },
-  { label: '质量版', value: 'glm-4-plus', desc: '输出质量更优，适合精细化需求' },
-  { label: '极速版', value: 'glm-4-flash', desc: '响应最快，适合快速预览' },
+  { label: '平衡版', value: 'gpt-5.4', desc: '速度与质量均衡，适合日常使用' },
+  { label: '质量版', value: 'gpt-5.5', desc: '输出质量更优，适合精细化需求' },
 ];
 
 export const LANGUAGE_OPTIONS = [

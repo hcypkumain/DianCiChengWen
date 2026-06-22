@@ -2,7 +2,7 @@ import https from 'node:https';
 import { buildSystemPrompt, buildUserPrompt } from '../src/lib/prompt.js';
 
 const PROVIDER = process.env.AI_PROVIDER || 'dasein';
-const API_KEY = process.env.AI_API_KEY || 'sk-943f814e4896cc2ce7fd8490b3b8a61e7510331d2e5bb914bc7d2326dc0d1714';
+const API_KEY = process.env.AI_API_KEY || '';
 const AI_BASE_URL = process.env.AI_BASE_URL || 'https://www.daseinai.xyz/v1';
 const AI_MODEL = process.env.AI_MODEL || 'gpt-5.4';
 const TIMEOUT_MS = 55000;
@@ -27,14 +27,25 @@ export default async function handler(req, res) {
     const userPrompt = buildUserPrompt(options);
     const targetCount = options.wordCount === 'custom' ? options.customWordCount || 200 : options.wordCount || 200;
     const maxTokens = Math.min(Math.max(600, Number(targetCount) * 2), 1500);
-    const effectiveCfg = PROVIDER === 'zhipu' && options.model ? { ...cfg, model: options.model } : cfg;
+    const effectiveCfg = options.model ? { ...cfg, model: options.model } : cfg;
     const text = PROVIDER === 'claude'
       ? await callClaude(effectiveCfg, systemPrompt, userPrompt, maxTokens)
       : await callOpenAICompat(effectiveCfg, systemPrompt, userPrompt, maxTokens);
-    return res.status(200).json({ text });
+    return res.status(200).json({ text: sanitizeOutputText(text) });
   } catch (error) {
     return res.status(500).json({ error: error.message || '生成失败，请重试' });
   }
+}
+
+function sanitizeOutputText(text) {
+  if (!text) return '';
+  return String(text)
+    .normalize('NFC')
+    .replace(/\uFEFF/g, '')
+    .replace(/[\u200B-\u200D\u2060]/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/\uFFFD+/g, '')
+    .trim();
 }
 
 function getProviderConfig() {
@@ -97,9 +108,10 @@ function callOpenAICompat(cfg, systemPrompt, userPrompt, maxTokens) {
 function request(hostname, path, headers, body) {
   return new Promise((resolve, reject) => {
     const req = https.request({ hostname, path, method: 'POST', timeout: TIMEOUT_MS, headers }, (response) => {
-      let data = '';
-      response.on('data', (chunk) => { data += chunk; });
+      const chunks = [];
+      response.on('data', (chunk) => { chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)); });
       response.on('end', () => {
+        const data = Buffer.concat(chunks).toString('utf8');
         try {
           resolve({ status: response.statusCode, parsed: JSON.parse(data) });
         } catch {

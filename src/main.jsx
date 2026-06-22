@@ -24,7 +24,7 @@ const defaultState = {
   selectedPurpose: { value: '', label: '' },
   selectedLogic: { value: 'only_input', label: '仅使用输入的词汇', subValue: '', subLabel: '' },
   selectedLanguage: { value: '', label: '' },
-  selectedModel: { value: 'glm-4', label: '平衡版' },
+  selectedModel: { value: 'gpt-5.4', label: '平衡版' },
   customWordCount: '',
 };
 
@@ -33,7 +33,6 @@ function optionLabel(options, value) {
 }
 
 function App() {
-  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('dcwUser') || 'null'));
   const [state, setState] = useState(defaultState);
   const [sheet, setSheet] = useState({ visible: false, showSub: false, showCustom: false, custom: '' });
   const [loading, setLoading] = useState({ active: false, progress: 0, tip: '正在思考文本结构……' });
@@ -42,6 +41,7 @@ function App() {
   const [toast, setToast] = useState('');
   const resultRef = useRef(null);
   const progressRef = useRef(null);
+  const generationRef = useRef(0);
 
   const wordLevels = lookupWords(parseWords(state.inputWords));
   const showCustomWordInput = state.selectedWordCount.value === 'custom';
@@ -51,11 +51,6 @@ function App() {
     const timer = setTimeout(() => setToast(''), 2200);
     return () => clearTimeout(timer);
   }, [toast]);
-
-  function saveUser(nextUser) {
-    localStorage.setItem('dcwUser', JSON.stringify(nextUser));
-    setUser(nextUser);
-  }
 
   function openSheet(selectorId, label, options, subOptions, currentValue) {
     setSheet({ visible: true, selectorId, label, options, subOptions, currentValue: String(currentValue || ''), subValue: '', showSub: false, showCustom: false, custom: '' });
@@ -101,6 +96,7 @@ function App() {
   }
 
   function startProgress() {
+    clearInterval(progressRef.current);
     const tips = ['正在分析词汇语义网络……', '正在构建文本语境框架……', '正在生成语言材料……', '正在优化文本质量……', '即将完成……'];
     setLoading({ active: true, progress: 5, tip: '正在分析词汇……' });
     progressRef.current = setInterval(() => {
@@ -114,8 +110,11 @@ function App() {
   }
 
   async function generate() {
+    if (loading.active) return;
     if (!state.inputWords.trim()) return setToast('请先输入词汇');
     if (!state.selectedRegister.value) return setToast('请选择语体');
+    const generationId = generationRef.current + 1;
+    generationRef.current = generationId;
     const targetCount = state.selectedWordCount.value === 'custom' ? parseInt(state.customWordCount, 10) || 200 : state.selectedWordCount.value || 200;
     const options = {
       words: state.inputWords,
@@ -126,35 +125,42 @@ function App() {
       logic: state.selectedLogic.value || 'only_input',
       expandType: state.selectedLogic.subValue || 'auto',
       language: state.selectedLanguage.value || 'en',
-      model: state.selectedModel.value || 'glm-4',
+      model: state.selectedModel.value || 'gpt-5.4',
       customWordCount: targetCount,
     };
 
     startProgress();
     setResult({ text: '', charCount: 0 });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 70000);
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(options),
+        signal: controller.signal,
       });
       const data = await response.json();
+      if (generationRef.current !== generationId) return;
       if (!response.ok || !data.text) throw new Error(data.error || '生成失败，请重试');
+      const cleanText = sanitizeOutputText(data.text);
       clearInterval(progressRef.current);
       setLoading({ active: true, progress: 100, tip: '生成完成！' });
       setTimeout(() => {
+        if (generationRef.current !== generationId) return;
         setLoading({ active: false, progress: 0, tip: '正在思考文本结构……' });
-        setResult({ text: data.text, charCount: countChineseChars(data.text) });
+        setResult({ text: cleanText, charCount: countChineseChars(cleanText) });
         setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
       }, 500);
     } catch (error) {
+      if (generationRef.current !== generationId) return;
       clearInterval(progressRef.current);
       setLoading({ active: false, progress: 0, tip: '正在思考文本结构……' });
-      setToast(error.message || '生成失败，请重试');
+      setToast(error.name === 'AbortError' ? '生成超时，请重试' : error.message || '生成失败，请重试');
+    } finally {
+      clearTimeout(timeout);
     }
   }
-
-  if (!user) return <LoginPage onLogin={saveUser} toast={setToast} />;
 
   return (
     <main className="page-bg">
@@ -191,7 +197,7 @@ function App() {
 
       {showCustomWordInput && <div className="custom-word-wrap"><span>自定义字数：</span><input type="number" value={state.customWordCount} maxLength={5} placeholder="请输入" onChange={(event) => setState((prev) => ({ ...prev, customWordCount: event.target.value }))} /><span>字</span></div>}
 
-      <button className={`generate-btn ${loading.active ? 'loading' : ''}`} disabled={loading.active} onClick={generate}>{loading.active ? '生成中……' : '生 成 文 本'}</button>
+      <button className={`generate-btn ${loading.active ? 'loading' : ''}`} disabled={loading.active} onClick={generate}>{loading.active ? '生成中……' : result.text ? '重 新 生 成' : '生 成 文 本'}</button>
 
       {result.text && <section ref={resultRef} className="result-section"><div className="result-header"><span className="result-title">生成文本</span><span className="result-count">实际字数：{result.charCount}字</span></div><RichEditor text={result.text} charCount={result.charCount} toast={setToast} /></section>}
 
@@ -209,40 +215,6 @@ function App() {
       </section>
     </main>
   );
-}
-
-function LoginPage({ onLogin, toast }) {
-  const [mode, setMode] = useState('wechat');
-  const [phone, setPhone] = useState('');
-  const [code, setCode] = useState('');
-  const [countDown, setCountDown] = useState(0);
-  const [logging, setLogging] = useState(false);
-
-  useEffect(() => {
-    if (countDown <= 0) return;
-    const timer = setTimeout(() => setCountDown((prev) => prev - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [countDown]);
-
-  function oneClickLogin() {
-    if (logging) return;
-    setLogging(true);
-    setTimeout(() => onLogin({ openid: `web_${Date.now()}` }), 450);
-  }
-
-  function sendCode() {
-    if (!/^\d{11}$/.test(phone)) return toast('请输入正确的手机号');
-    setCountDown(60);
-    toast('验证码已发送，演示验证码为 123456');
-  }
-
-  function phoneLogin() {
-    if (!/^\d{11}$/.test(phone)) return toast('请输入正确的手机号');
-    if (code !== '123456') return toast('请输入6位验证码');
-    onLogin({ phone, openid: `phone_${phone}` });
-  }
-
-  return <main className="login-page"><div className="login-header"><CakeMark /><h1>点词成文</h1><p>智能生成专业文本，适用汉语词汇教学</p></div><div className="welcome-text">登录后即可使用</div><div className="login-tabs"><button className={mode === 'wechat' ? 'active' : ''} onClick={() => setMode('wechat')}>微信登录</button><button className={mode === 'phone' ? 'active' : ''} onClick={() => setMode('phone')}>手机号登录</button></div>{mode === 'wechat' ? <button className={`login-btn ${logging ? 'loading' : ''}`} onClick={oneClickLogin}>{logging ? '登录中……' : '微信一键登录'}</button> : <div className="login-form"><label><span>手机号</span><input value={phone} inputMode="numeric" maxLength={11} placeholder="请输入手机号" onChange={(event) => setPhone(event.target.value)} /></label><label><span>验证码</span><input value={code} inputMode="numeric" maxLength={6} placeholder="6位短信验证码" onChange={(event) => setCode(event.target.value)} /><button type="button" disabled={countDown > 0} onClick={sendCode}>{countDown > 0 ? `${countDown}s后重发` : '获取验证码'}</button></label><button className="login-btn" onClick={phoneLogin}>登 录</button></div>}<p className="agreement">登录即表示同意《用户协议》与《隐私政策》</p></main>;
 }
 
 function OptionSelector({ id, label, value, options, subOptions = [], onOpen }) {
@@ -313,7 +285,17 @@ function RichEditor({ text, charCount, toast }) {
 }
 
 function textToHtml(value) {
-  return value.split('\n').map((line) => `<p>${escapeHtml(line || ' ')}</p>`).join('');
+  return sanitizeOutputText(value).split('\n').map((line) => `<p>${escapeHtml(line || ' ')}</p>`).join('');
+}
+
+function sanitizeOutputText(value) {
+  return String(value || '')
+    .normalize('NFC')
+    .replace(/\uFEFF/g, '')
+    .replace(/[\u200B-\u200D\u2060]/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/\uFFFD+/g, '')
+    .trim();
 }
 
 function escapeHtml(value) {
