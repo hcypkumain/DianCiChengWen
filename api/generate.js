@@ -22,7 +22,7 @@ export default async function handler(req, res) {
   if (!cfg) return res.status(500).json({ error: `不支持的 provider: ${PROVIDER}` });
 
   try {
-    const options = req.body || {};
+    const options = normalizeRequestBody(req.body);
     const systemPrompt = buildSystemPrompt();
     const userPrompt = buildUserPrompt(options);
     const targetCount = options.wordCount === 'custom' ? options.customWordCount || 200 : options.wordCount || 200;
@@ -46,6 +46,18 @@ function sanitizeOutputText(text) {
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
     .replace(/\uFFFD+/g, '')
     .trim();
+}
+
+function normalizeRequestBody(body) {
+  if (!body) return {};
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body);
+    } catch {
+      return {};
+    }
+  }
+  return body;
 }
 
 function getProviderConfig() {
@@ -81,7 +93,12 @@ function callClaude(cfg, systemPrompt, userPrompt, maxTokens) {
 
 function callOpenAICompat(cfg, systemPrompt, userPrompt, maxTokens) {
   const thinking = PROVIDER === 'zhipu' && /z1|thinking|rumination|5\.|4\.6/.test(cfg.model);
-  const payload = {
+  const isStrictCompat = PROVIDER === 'dasein' || Boolean(AI_BASE_URL) || /^https?:\/\//.test(PROVIDER);
+  const payload = isStrictCompat ? {
+    model: cfg.model,
+    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
+    max_tokens: maxTokens,
+  } : {
     model: cfg.model,
     messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }],
     ...(thinking ? { temperature: 1, max_completion_tokens: maxTokens } : { temperature: 0.7, top_p: 0.9, max_tokens: maxTokens }),
@@ -92,7 +109,7 @@ function callOpenAICompat(cfg, systemPrompt, userPrompt, maxTokens) {
     Authorization: `Bearer ${API_KEY}`,
     'Content-Length': Buffer.byteLength(body),
   }, body).then(({ status, parsed }) => {
-    if (status >= 400) throw new Error(parsed.error?.message || parsed.message || JSON.stringify(parsed).slice(0, 200));
+    if (status >= 400) throw new Error(extractApiError(parsed));
     const msg = parsed.choices?.[0]?.message;
     if (typeof msg?.content === 'string' && msg.content.trim()) return msg.content;
     if (typeof msg?.reasoning_content === 'string' && msg.reasoning_content.trim()) return msg.content?.trim() ? msg.content : msg.reasoning_content;
@@ -103,6 +120,12 @@ function callOpenAICompat(cfg, systemPrompt, userPrompt, maxTokens) {
     if (typeof parsed.choices?.[0]?.text === 'string' && parsed.choices[0].text.trim()) return parsed.choices[0].text;
     throw new Error(`${cfg.model} 返回格式无法识别`);
   });
+}
+
+function extractApiError(parsed) {
+  const message = parsed?.error?.message || parsed?.message || parsed?.detail || parsed?.error;
+  if (typeof message === 'string') return message;
+  return JSON.stringify(parsed).slice(0, 500);
 }
 
 function request(hostname, path, headers, body) {
