@@ -285,41 +285,64 @@ function LoginPage({ onAuthenticated, toast, setToast }) {
   return (
     <main className="login-page">
       {toast && <div className="toast">{toast}</div>}
-      <section className="login-header">
-        <CakeMark />
-        <h1>点词成文</h1>
-        <p>请先登录后使用文本生成工具</p>
+      <section className="login-visual" aria-hidden="true">
+        <div className="login-brand">
+          <CakeMark />
+          <span>点词成文</span>
+        </div>
+        <div className="visual-copy">
+          <span className="visual-kicker">汉语词汇教学工作台</span>
+          <h2>把零散词汇，组织成可以直接教学的文本。</h2>
+          <p>输入目标词、选择语体和难度，生成适合课堂、写作和复习的语言材料。</p>
+        </div>
+        <div className="preview-window">
+          <div className="preview-toolbar"><span /><span /><span /></div>
+          <img src="/image_214290945933763.png" alt="" />
+        </div>
+        <div className="floating-words">
+          <span>语义网络</span>
+          <span>HSK 7-9</span>
+          <span>课堂文本</span>
+          <span>词汇复现</span>
+        </div>
       </section>
-      <div className="login-tabs">
-        <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>登录</button>
-        <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>注册</button>
-      </div>
-      <form className="login-form" onSubmit={submit}>
-        <label>
-          <span>手机号</span>
-          <input
-            value={form.phone}
-            inputMode="tel"
-            autoComplete="tel"
-            placeholder="请输入手机号"
-            onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))}
-          />
-        </label>
-        <label>
-          <span>密码</span>
-          <input
-            value={form.password}
-            type="password"
-            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-            placeholder="至少 6 位"
-            onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
-          />
-        </label>
-        <button className={`login-btn ${submitting ? 'loading' : ''}`} disabled={submitting}>
-          {submitting ? '请稍候……' : mode === 'register' ? '注 册 并 登 录' : '登 录'}
-        </button>
-      </form>
-      <p className="agreement">手机号仅用于账户登录，密码会加盐哈希后存储。</p>
+      <section className="login-panel">
+        <section className="login-header">
+          <CakeMark />
+          <h1>点词成文</h1>
+          <p>请先登录后使用文本生成工具</p>
+        </section>
+        <div className="login-tabs">
+          <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>登录</button>
+          <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>注册</button>
+        </div>
+        <form className="login-form" onSubmit={submit}>
+          <label>
+            <span>手机号</span>
+            <input
+              value={form.phone}
+              inputMode="tel"
+              autoComplete="tel"
+              placeholder="请输入手机号"
+              onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))}
+            />
+          </label>
+          <label>
+            <span>密码</span>
+            <input
+              value={form.password}
+              type="password"
+              autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+              placeholder="至少 6 位"
+              onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
+            />
+          </label>
+          <button className={`login-btn ${submitting ? 'loading' : ''}`} disabled={submitting}>
+            {submitting ? '请稍候……' : mode === 'register' ? '注 册 并 登 录' : '登 录'}
+          </button>
+        </form>
+        <p className="agreement">手机号仅用于账户登录，密码会加盐哈希后存储。</p>
+      </section>
     </main>
   );
 }
