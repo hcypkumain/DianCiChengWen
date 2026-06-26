@@ -1,5 +1,6 @@
 import https from 'node:https';
 import { buildSystemPrompt, buildUserPrompt } from '../src/lib/prompt.js';
+import { requireAuth } from './auth-utils.js';
 
 const PROVIDER = process.env.AI_PROVIDER || 'dasein';
 const API_KEY = process.env.AI_API_KEY || '';
@@ -22,6 +23,7 @@ export default async function handler(req, res) {
   if (!cfg) return res.status(500).json({ error: `不支持的 provider: ${PROVIDER}` });
 
   try {
+    requireAuth(req);
     const options = normalizeRequestBody(req.body);
     const systemPrompt = buildSystemPrompt();
     const userPrompt = buildUserPrompt(options);
@@ -33,7 +35,7 @@ export default async function handler(req, res) {
       : await callOpenAICompat(effectiveCfg, systemPrompt, userPrompt, maxTokens);
     return res.status(200).json({ text: sanitizeOutputText(text) });
   } catch (error) {
-    return res.status(500).json({ error: error.message || '生成失败，请重试' });
+    return res.status(error.statusCode || 500).json({ error: error.message || '生成失败，请重试' });
   }
 }
 

@@ -16,6 +16,8 @@ import { countChineseChars, parseWords } from './lib/prompt.js';
 import { lookupWords } from './lib/hskVocab.js';
 import './styles.css';
 
+const AUTH_STORAGE_KEY = 'diancichengwen_auth';
+
 const defaultState = {
   inputWords: '',
   selectedRegister: { value: '', label: '' },
@@ -33,6 +35,7 @@ function optionLabel(options, value) {
 }
 
 function App() {
+  const [auth, setAuth] = useState(() => readStoredAuth());
   const [state, setState] = useState(defaultState);
   const [sheet, setSheet] = useState({ visible: false, showSub: false, showCustom: false, custom: '' });
   const [loading, setLoading] = useState({ active: false, progress: 0, tip: '正在思考文本结构……' });
@@ -51,6 +54,21 @@ function App() {
     const timer = setTimeout(() => setToast(''), 2200);
     return () => clearTimeout(timer);
   }, [toast]);
+
+  function saveAuth(nextAuth) {
+    setAuth(nextAuth);
+    if (nextAuth) {
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth));
+    } else {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+    }
+  }
+
+  function logout() {
+    saveAuth(null);
+    setResult({ text: '', charCount: 0 });
+    setToast('已退出登录');
+  }
 
   function openSheet(selectorId, label, options, subOptions, currentValue) {
     setSheet({ visible: true, selectorId, label, options, subOptions, currentValue: String(currentValue || ''), subValue: '', showSub: false, showCustom: false, custom: '' });
@@ -136,12 +154,16 @@ function App() {
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${auth?.token || ''}` },
         body: JSON.stringify(options),
         signal: controller.signal,
       });
       const data = await response.json();
       if (generationRef.current !== generationId) return;
+      if (response.status === 401) {
+        saveAuth(null);
+        throw new Error('登录已过期，请重新登录');
+      }
       if (!response.ok || !data.text) throw new Error(data.error || '生成失败，请重试');
       const cleanText = sanitizeOutputText(data.text);
       clearInterval(progressRef.current);
@@ -162,10 +184,18 @@ function App() {
     }
   }
 
+  if (!auth?.token) {
+    return <LoginPage onAuthenticated={saveAuth} toast={toast} setToast={setToast} />;
+  }
+
   return (
     <main className="page-bg">
       {toast && <div className="toast">{toast}</div>}
       {loading.active && <LoadingCake progress={loading.progress} tip={loading.tip} />}
+      <div className="user-bar">
+        <span>{auth.user?.phone}</span>
+        <button onClick={logout}>退出</button>
+      </div>
       <section className="header-section">
         <span className="app-name">点词成文</span>
         <span className="app-subtitle">智能生成专业文本，适用汉语词汇教学</span>
@@ -213,6 +243,83 @@ function App() {
         {!sheet.showSub && sheet.showCustom && <div className="sheet-custom-row"><input value={sheet.custom} autoFocus placeholder="请输入…" onChange={(event) => setSheet((prev) => ({ ...prev, custom: event.target.value }))} /><button onClick={confirmCustom}>确定</button></div>}
         {sheet.showSub && <><button className="sheet-sub-back" onClick={() => setSheet((prev) => ({ ...prev, showSub: false }))}>‹ 返回</button><div className="sheet-sub-title">选择扩展方式</div>{sheet.subOptions?.map((item) => <button key={item.value} className="sheet-item" onClick={() => { const main = sheet.options.find((option) => option.value === sheet.currentValue); applySelection(main, item.value, item.label); closeSheet(); }}><span>{item.label}</span>{item.desc && <small>{item.desc}</small>}</button>)}</>}
       </section>
+    </main>
+  );
+}
+
+function readStoredAuth() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || 'null');
+    return parsed?.token ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function LoginPage({ onAuthenticated, toast, setToast }) {
+  const [mode, setMode] = useState('login');
+  const [form, setForm] = useState({ phone: '', password: '' });
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    if (submitting) return;
+    setSubmitting(true);
+    try {
+      const response = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: mode, phone: form.phone, password: form.password }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.token) throw new Error(data.error || '操作失败，请重试');
+      onAuthenticated({ token: data.token, user: data.user });
+      setToast(mode === 'register' ? '注册成功' : '登录成功');
+    } catch (error) {
+      setToast(error.message || '操作失败，请重试');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="login-page">
+      {toast && <div className="toast">{toast}</div>}
+      <section className="login-header">
+        <CakeMark />
+        <h1>点词成文</h1>
+        <p>请先登录后使用文本生成工具</p>
+      </section>
+      <div className="login-tabs">
+        <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>登录</button>
+        <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>注册</button>
+      </div>
+      <form className="login-form" onSubmit={submit}>
+        <label>
+          <span>手机号</span>
+          <input
+            value={form.phone}
+            inputMode="tel"
+            autoComplete="tel"
+            placeholder="请输入手机号"
+            onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))}
+          />
+        </label>
+        <label>
+          <span>密码</span>
+          <input
+            value={form.password}
+            type="password"
+            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+            placeholder="至少 6 位"
+            onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
+          />
+        </label>
+        <button className={`login-btn ${submitting ? 'loading' : ''}`} disabled={submitting}>
+          {submitting ? '请稍候……' : mode === 'register' ? '注 册 并 登 录' : '登 录'}
+        </button>
+      </form>
+      <p className="agreement">手机号仅用于账户登录，密码会加盐哈希后存储。</p>
     </main>
   );
 }

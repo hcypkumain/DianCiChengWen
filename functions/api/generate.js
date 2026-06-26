@@ -1,4 +1,5 @@
 import { buildSystemPrompt, buildUserPrompt } from '../../src/lib/prompt.js';
+import { getAuthEnv, requireAuth } from './auth-utils.js';
 
 const DEFAULT_BASE_URL = 'https://www.daseinai.xyz/v1';
 const DEFAULT_PROVIDER = 'dasein';
@@ -14,6 +15,7 @@ export async function onRequest(context) {
   if (!apiKey) return jsonResponse({ error: '未配置 AI_API_KEY' }, 500);
 
   try {
+    requireAuth(request, getAuthEnv(context));
     const options = await readJson(request);
     const cfg = getProviderConfig(env, options);
     const systemPrompt = buildSystemPrompt();
@@ -23,7 +25,7 @@ export async function onRequest(context) {
     const text = await callOpenAICompat(cfg, apiKey, systemPrompt, userPrompt, maxTokens);
     return jsonResponse({ text: sanitizeOutputText(text) });
   } catch (error) {
-    return jsonResponse({ error: error.message || '生成失败，请重试' }, 500);
+    return jsonResponse({ error: error.message || '生成失败，请重试' }, error.statusCode || 500);
   }
 }
 

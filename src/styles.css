@@ -5,6 +5,8 @@ button, input, textarea { font: inherit; }
 button { border: 0; cursor: pointer; }
 .toast { position: fixed; left: 50%; top: 22px; z-index: 2000; transform: translateX(-50%); background: rgba(58, 92, 53, .92); color: #fff; padding: 10px 18px; border-radius: 999px; box-shadow: 0 10px 30px rgba(74,112,68,.22); }
 .page-bg { width: min(760px, 100%); min-height: 100vh; margin: 0 auto; padding: 0 18px 90px; background: #f4f8f1; }
+.user-bar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding-top: 14px; color: #7c9876; font-size: 13px; }
+.user-bar button { padding: 6px 10px; border: 1px solid #c8e0c2; border-radius: 8px; background: #fafff8; color: #6b9063; }
 .header-section { padding: 30px 0 18px; display: flex; flex-direction: column; align-items: center; gap: 5px; }
 .app-name { font-size: 15px; color: #6b9063; letter-spacing: 2px; }
 .app-subtitle { font-size: 12px; color: #aaa; text-align: center; }
