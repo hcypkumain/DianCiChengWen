@@ -297,7 +297,23 @@ function LoginPage({ onAuthenticated, toast, setToast }) {
         </div>
         <div className="preview-window">
           <div className="preview-toolbar"><span /><span /><span /></div>
-          <img src="/image_214290945933763.png" alt="" />
+          <div className="preview-board">
+            <div className="preview-input">
+              <span>目标词汇</span>
+              <strong>城市 · 交通 · 体验 · 变化</strong>
+              <p>地铁 / 站台 / 志愿者 / 方向 / 方便 / 排队</p>
+            </div>
+            <div className="preview-options">
+              <span>叙事文</span>
+              <span>HSK 4</span>
+              <span>课堂复习</span>
+            </div>
+            <article className="preview-result">
+              <p>早高峰的地铁站很忙，站台上排着长长的队。</p>
+              <p>一位志愿者站在入口旁边，耐心地给乘客指方向。</p>
+              <p>这些普通的词语，被组织成可以直接阅读和讲解的文本。</p>
+            </article>
+          </div>
         </div>
         <div className="floating-words">
           <span>语义网络</span>
