@@ -588,7 +588,6 @@ function LoginPage({ onAuthenticated, toast, setToast }) {
                   inputMode="numeric"
                   autoComplete="tel"
                   placeholder="请输入 11 位手机号"
-                  maxLength={11}
                   aria-invalid={errors.phone ? 'true' : undefined}
                   aria-describedby="phoneError"
                   onChange={(event) => updateLoginField('phone', event.target.value)}
