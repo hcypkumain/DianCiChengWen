@@ -15,7 +15,7 @@ export async function onRequest(context) {
   if (!apiKey) return jsonResponse({ error: '未配置 AI_API_KEY' }, 500);
 
   try {
-    requireAuth(request, getAuthEnv(context));
+    await requireAuth(request, getAuthEnv(context));
     const options = await readJson(request);
     const cfg = getProviderConfig(env, options);
     const systemPrompt = buildSystemPrompt();

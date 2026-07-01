@@ -1,4 +1,4 @@
-import { ensureUserTable, getAuthEnv, getSql, hashPassword, signToken, validateCredentials, verifyPassword } from './auth-utils.js';
+import { getAuthEnv, getAuthKV, hashPassword, signToken, userKey, validateCredentials, verifyPassword } from './auth-utils.js';
 
 export async function onRequest(context) {
   const { request } = context;
@@ -7,41 +7,60 @@ export async function onRequest(context) {
 
   try {
     const env = getAuthEnv(context);
-    const sql = getSql(env);
-    await ensureUserTable(sql);
+    const kv = getAuthKV(context, env);
     const { action = 'login', phone, password } = await readJson(request);
     const credentials = validateCredentials(phone, password);
 
-    if (action === 'register') return register(sql, env, credentials);
-    if (action === 'login') return login(sql, env, credentials);
+    if (action === 'register') return register(kv, env, credentials);
+    if (action === 'login') return login(kv, env, credentials);
     return jsonResponse({ error: '未知操作' }, 400);
   } catch (error) {
     return jsonResponse({ error: error.message || '请求失败' }, error.statusCode || 500);
   }
 }
 
-async function register(sql, env, { phone, password }) {
+async function register(kv, env, { phone, password }) {
+  const key = await userKey(phone);
+  const existing = await readUser(kv, key);
+  if (existing) return jsonResponse({ error: '该手机号已注册' }, 409);
+
+  const now = new Date().toISOString();
+  const user = {
+    id: crypto.randomUUID(),
+    phone,
+    passwordHash: await hashPassword(password),
+    createdAt: now,
+    updatedAt: now,
+  };
+  await writeUser(kv, key, user);
+  return jsonResponse({ token: await signToken(user, env.AUTH_SECRET), user: publicUser(user) }, 201);
+}
+
+async function login(kv, env, { phone, password }) {
+  const user = await readUser(kv, await userKey(phone));
+  if (!user || !(await verifyPassword(password, user.passwordHash))) {
+    return jsonResponse({ error: '手机号或密码不正确' }, 401);
+  }
+  return jsonResponse({ token: await signToken(user, env.AUTH_SECRET), user: publicUser(user) });
+}
+
+async function readUser(kv, key) {
+  const value = await kv.get(key);
+  if (!value) return null;
+  if (typeof value === 'object') return value;
   try {
-    const rows = await sql`
-      INSERT INTO app_users (phone, password_hash)
-      VALUES (${phone}, ${hashPassword(password)})
-      RETURNING id, phone
-    `;
-    const user = rows[0];
-    return jsonResponse({ token: signToken(user, env.AUTH_SECRET), user }, 201);
-  } catch (error) {
-    if (error.code === '23505') return jsonResponse({ error: '该手机号已注册' }, 409);
-    throw error;
+    return JSON.parse(value);
+  } catch {
+    return null;
   }
 }
 
-async function login(sql, env, { phone, password }) {
-  const rows = await sql`SELECT id, phone, password_hash FROM app_users WHERE phone = ${phone} LIMIT 1`;
-  const user = rows[0];
-  if (!user || !verifyPassword(password, user.password_hash)) {
-    return jsonResponse({ error: '手机号或密码不正确' }, 401);
-  }
-  return jsonResponse({ token: signToken(user, env.AUTH_SECRET), user: { id: user.id, phone: user.phone } });
+async function writeUser(kv, key, user) {
+  await kv.put(key, JSON.stringify(user));
+}
+
+function publicUser(user) {
+  return { id: user.id, phone: user.phone };
 }
 
 async function readJson(request) {
