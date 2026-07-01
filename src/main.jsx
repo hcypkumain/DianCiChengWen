@@ -442,13 +442,48 @@ function Hero() {
 
 function LoginPage({ onAuthenticated, toast, setToast }) {
   const [mode, setMode] = useState('login');
-  const [form, setForm] = useState({ phone: '', password: '' });
+  const [form, setForm] = useState({ phone: '', password: '', confirmPassword: '', terms: false });
+  const [errors, setErrors] = useState({});
+  const [status, setStatus] = useState({ type: '', message: '' });
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const isRegister = mode === 'register';
+
+  function changeMode(nextMode) {
+    setMode(nextMode);
+    setErrors({});
+    setStatus({ type: '', message: '' });
+    setPasswordVisible(false);
+  }
+
+  function updateLoginField(name, value) {
+    const nextValue = name === 'phone' ? value.replace(/\D/g, '').slice(0, 11) : value;
+    setForm((current) => ({ ...current, [name]: nextValue }));
+    setErrors((current) => ({ ...current, [name]: false, terms: name === 'terms' ? false : current.terms }));
+    if (status.type === 'error') setStatus({ type: '', message: '' });
+  }
+
+  function validateLoginForm() {
+    const nextErrors = {};
+    if (!/^1[3-9]\d{9}$/.test(form.phone.trim())) nextErrors.phone = true;
+    if (form.password.length < 8) nextErrors.password = true;
+    if (isRegister && (form.confirmPassword !== form.password || form.confirmPassword.length < 8)) nextErrors.confirmPassword = true;
+    if (isRegister && !form.terms) nextErrors.terms = true;
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length) {
+      setStatus({ type: 'error', message: nextErrors.terms ? '注册前请先同意服务条款与隐私政策。' : '请检查手机号和密码后再继续。' });
+      return false;
+    }
+    return true;
+  }
 
   async function submit(event) {
     event.preventDefault();
     if (submitting) return;
+    if (!validateLoginForm()) return;
     setSubmitting(true);
+    setStatus({ type: 'success', message: isRegister ? '正在创建账号并进入工程页面…' : '正在验证账号并进入工程页面…' });
     try {
       const response = await fetch('/api/auth', {
         method: 'POST',
@@ -458,9 +493,9 @@ function LoginPage({ onAuthenticated, toast, setToast }) {
       const data = await response.json();
       if (!response.ok || !data.token) throw new Error(data.error || '操作失败，请重试');
       onAuthenticated({ token: data.token, user: data.user });
-      setToast(mode === 'register' ? '注册成功' : '登录成功');
+      setToast(isRegister ? '注册成功' : '登录成功');
     } catch (error) {
-      setToast(error.message || '操作失败，请重试');
+      setStatus({ type: 'error', message: error.message || '操作失败，请重试' });
     } finally {
       setSubmitting(false);
     }
@@ -469,30 +504,164 @@ function LoginPage({ onAuthenticated, toast, setToast }) {
   return (
     <main className="login-page">
       {toast && <div className="toast">{toast}</div>}
-      <section className="login-visual" aria-hidden="true">
-        <div className="brand login-brand"><span className="brand-mark">点</span><span>点词成文</span></div>
-        <div className="hero-copy-block">
-          <span className="eyebrow">汉语词汇教学工作台</span>
-          <h1>先检索 HSK，再生成可教学文本。</h1>
-          <p className="hero-copy">登录后使用真实 AI 生成接口，保留课堂文本、理解问题与活动建议的完整工作流。</p>
+      <section className="brand-panel" aria-label="点词成文产品介绍">
+        <div className="brand-top">
+          <a className="brand" href="#" aria-label="点词成文">
+            <span className="brand-mark" aria-hidden="true">点</span>
+            <span>点词成文</span>
+          </a>
+          <span className="locale-pill">简体中文 · CN</span>
+        </div>
+
+        <div className="login-hero-copy">
+          <div className="eyebrow">对外汉语教师的词汇文本生成工程</div>
+          <h1>登录后，继续生成可直接上课的中文文本。</h1>
+          <p>
+            点词成文围绕 <strong>目标词汇、HSK 等级、文本类型与课堂目标</strong> 生成教学材料。
+            适合新词导入、阅读理解、口语操练和测验材料准备。
+          </p>
+        </div>
+
+        <div className="product-shot" aria-label="产品预览">
+          <article className="screen-card">
+            <div className="screen-toolbar">
+              <div className="traffic" aria-hidden="true"><span /><span /><span /></div>
+              <b>HSK Lookup · Text Generation</b>
+            </div>
+            <div className="screen-body">
+              <div className="vocab-row">
+                <span className="chip hsk-2">市场 <small>HSK2</small></span>
+                <span className="chip hsk-1">水果 <small>HSK1</small></span>
+                <span className="chip hsk-3">一斤 <small>HSK3</small></span>
+                <span className="chip hsk-4">商量 <small>HSK4</small></span>
+              </div>
+              <h2 className="mock-title">市场里的水果</h2>
+              <div className="mock-lines" aria-hidden="true">
+                <div className="mock-line" />
+                <div className="mock-line" />
+                <div className="mock-line" />
+                <div className="mock-line" />
+              </div>
+              <div className="score-strip">
+                <div className="score"><span>词汇覆盖</span><b>100%</b></div>
+                <div className="score"><span>水平匹配</span><b>86%</b></div>
+                <div className="score"><span>课堂可用</span><b>92%</b></div>
+              </div>
+            </div>
+          </article>
+
+          <aside className="insight-card">
+            <ul className="insight-list">
+              <li>输入词汇后自动检索 HSK 等级并分色。</li>
+              <li>根据学习者水平生成对话、短文、通知、考试阅读等材料。</li>
+              <li>适配度显示计算依据，便于教师判断是否可直接使用。</li>
+            </ul>
+            <div className="metric-card">
+              <span>当前工程状态</span>
+              <b>教学材料生成台</b>
+            </div>
+          </aside>
         </div>
       </section>
-      <section className="login-panel">
-        <div className="login-header">
-          <span className="brand-mark">点</span>
-          <h1>点词成文</h1>
-          <p>请先登录后使用文本生成工具</p>
-        </div>
-        <div className="login-tabs">
-          <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>登录</button>
-          <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>注册</button>
-        </div>
-        <form className="login-form" onSubmit={submit}>
-          <label><span>手机号</span><input value={form.phone} inputMode="tel" autoComplete="tel" placeholder="请输入手机号" onChange={(event) => setForm((current) => ({ ...current, phone: event.target.value }))} /></label>
-          <label><span>密码</span><input value={form.password} type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} placeholder="至少 6 位" onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} /></label>
-          <button className="primary-button login-submit" disabled={submitting}>{submitting ? '请稍候……' : mode === 'register' ? '注册并登录' : '登录'}</button>
-        </form>
-        <p className="agreement">手机号仅用于账户登录，密码会加盐哈希后存储。</p>
+
+      <section className="form-panel" aria-label="登录与注册">
+        <article className="auth-card">
+          <div className="auth-head">
+            <h2>{isRegister ? '创建账号' : '欢迎回来'}</h2>
+            <p>{isRegister ? '注册后即可进入点词成文工程页面，开始生成课堂文本。' : '使用手机号和密码登录，进入点词成文工程页面。'}</p>
+          </div>
+
+          <div className="switcher" role="tablist" aria-label="登录或注册">
+            <button type="button" className={!isRegister ? 'active' : ''} role="tab" aria-selected={!isRegister} disabled={submitting} onClick={() => changeMode('login')}>登录</button>
+            <button type="button" className={isRegister ? 'active' : ''} role="tab" aria-selected={isRegister} disabled={submitting} onClick={() => changeMode('register')}>注册</button>
+          </div>
+
+          <form className="auth-form" onSubmit={submit} noValidate>
+            <div className={`auth-field ${errors.phone ? 'has-error' : ''}`}>
+              <label htmlFor="loginPhone">手机号</label>
+              <div className="input-wrap">
+                <span className="prefix">+86</span>
+                <input
+                  className="auth-input phone"
+                  id="loginPhone"
+                  value={form.phone}
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  placeholder="请输入 11 位手机号"
+                  maxLength={11}
+                  aria-invalid={errors.phone ? 'true' : undefined}
+                  aria-describedby="phoneError"
+                  onChange={(event) => updateLoginField('phone', event.target.value)}
+                />
+              </div>
+              <p className="error" id="phoneError">请输入有效的 11 位中国大陆手机号。</p>
+            </div>
+
+            <div className={`auth-field ${errors.password ? 'has-error' : ''}`}>
+              <div className="field-row">
+                <label htmlFor="loginPassword">密码</label>
+                {!isRegister && <button className="forgot" type="button" onClick={() => setStatus({ type: 'success', message: '已为你预留找回密码入口：实际接入时可跳转到短信验证流程。' })}>忘记密码？</button>}
+              </div>
+              <div className="input-wrap">
+                <input
+                  className="auth-input"
+                  id="loginPassword"
+                  value={form.password}
+                  type={passwordVisible ? 'text' : 'password'}
+                  autoComplete={isRegister ? 'new-password' : 'current-password'}
+                  placeholder="请输入密码"
+                  aria-invalid={errors.password ? 'true' : undefined}
+                  aria-describedby="passwordHelp passwordError"
+                  onChange={(event) => updateLoginField('password', event.target.value)}
+                />
+                <button className="password-toggle" type="button" aria-pressed={passwordVisible} onClick={() => setPasswordVisible((value) => !value)}>
+                  {passwordVisible ? '隐藏' : '显示'}
+                </button>
+              </div>
+              <p className="helper" id="passwordHelp">至少 8 位，建议包含字母与数字。</p>
+              <p className="error" id="passwordError">密码至少需要 8 位。</p>
+            </div>
+
+            {isRegister && (
+              <>
+                <div className={`auth-field ${errors.confirmPassword ? 'has-error' : ''}`}>
+                  <label htmlFor="confirmPassword">确认密码</label>
+                  <div className="input-wrap">
+                    <input
+                      className="auth-input"
+                      id="confirmPassword"
+                      value={form.confirmPassword}
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder="请再次输入密码"
+                      aria-invalid={errors.confirmPassword ? 'true' : undefined}
+                      aria-describedby="confirmError"
+                      onChange={(event) => updateLoginField('confirmPassword', event.target.value)}
+                    />
+                  </div>
+                  <p className="error" id="confirmError">两次输入的密码不一致。</p>
+                </div>
+
+                <label className={`checkbox-row ${errors.terms ? 'has-error' : ''}`}>
+                  <input type="checkbox" checked={form.terms} onChange={(event) => updateLoginField('terms', event.target.checked)} />
+                  <span>我已阅读并同意 <a href="#">服务条款</a> 与 <a href="#">隐私政策</a>，并确认该账号用于教学材料生成。</span>
+                </label>
+              </>
+            )}
+
+            {status.message && <div className={`status-message show ${status.type}`} role="status" aria-live="polite">{status.message}</div>}
+
+            <button className={`primary-button login-submit ${submitting ? 'loading' : ''}`} disabled={submitting}>
+              <span className="spinner" aria-hidden="true" />
+              <span className="button-text">{submitting ? '请稍候…' : isRegister ? '注册并进入工程' : '登录并进入工程'}</span>
+            </button>
+          </form>
+
+          <p className="fineprint">
+            继续即表示你同意点词成文对账号安全、教学内容生成和使用记录进行必要处理。
+            <a href="#">了解更多</a>
+          </p>
+        </article>
       </section>
     </main>
   );
