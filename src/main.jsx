@@ -76,6 +76,7 @@ function App() {
   const [form, setForm] = useState(DEFAULT_FORM);
   const [toast, setToast] = useState('');
   const [activeTab, setActiveTab] = useState('text');
+  const [exportScope, setExportScope] = useState('current');
   const [loading, setLoading] = useState({ active: false, progress: 0, message: '' });
   const [status, setStatus] = useState({ tone: '', text: '等待输入' });
   const [result, setResult] = useState(null);
@@ -224,7 +225,7 @@ function App() {
 
   async function copyCurrent() {
     try {
-      await navigator.clipboard.writeText(getTabPlainText(visibleResult, activeTab));
+      await navigator.clipboard.writeText(renderExportText(buildExportDocument({ form, result: visibleResult, activeTab, scope: exportScope, annotatedWords, relatedWords, metrics })));
       setToast('内容已复制');
     } catch {
       setToast('当前浏览器不支持自动复制');
@@ -241,23 +242,35 @@ function App() {
   }
 
   function downloadCurrent() {
-    const blob = new Blob([getTabPlainText(visibleResult, activeTab)], { type: 'text/plain;charset=utf-8' });
-    downloadBlob(blob, `${buildExportTitle(form, activeTab)}.txt`);
+    const exportDoc = buildExportDocument({ form, result: visibleResult, activeTab, scope: exportScope, annotatedWords, relatedWords, metrics });
+    const blob = new Blob([renderExportText(exportDoc)], { type: 'text/plain;charset=utf-8' });
+    downloadBlob(blob, `${exportDoc.filename}.txt`);
     setToast('文本已下载');
   }
 
   function exportPdf() {
-    const title = buildExportTitle(form, activeTab);
-    const blob = createPdfBlob(title, getTabPlainText(visibleResult, activeTab));
-    downloadBlob(blob, `${title}.pdf`);
+    const exportDoc = buildExportDocument({ form, result: visibleResult, activeTab, scope: exportScope, annotatedWords, relatedWords, metrics });
+    const blob = createPdfBlob(exportDoc);
+    downloadBlob(blob, `${exportDoc.filename}.pdf`);
     setToast('PDF 已下载');
   }
 
   function exportWord() {
-    const title = buildExportTitle(form, activeTab);
-    const blob = new Blob([buildWordHtml(title, getTabHtml(visibleResult, activeTab))], { type: 'application/msword;charset=utf-8' });
-    downloadBlob(blob, `${title}.doc`);
+    const exportDoc = buildExportDocument({ form, result: visibleResult, activeTab, scope: exportScope, annotatedWords, relatedWords, metrics });
+    const blob = new Blob([buildWordHtml(exportDoc)], { type: 'application/msword;charset=utf-8' });
+    downloadBlob(blob, `${exportDoc.filename}.doc`);
     setToast('Word 已下载');
+  }
+
+  async function exportImage() {
+    const exportDoc = buildExportDocument({ form, result: visibleResult, activeTab, scope: exportScope, annotatedWords, relatedWords, metrics });
+    try {
+      const blob = await createExportImageBlob(exportDoc);
+      downloadBlob(blob, `${exportDoc.filename}.png`);
+      setToast('图片已下载');
+    } catch {
+      setToast('图片导出失败，请重试');
+    }
   }
 
   if (!auth?.token) {
@@ -345,10 +358,16 @@ function App() {
               ))}
             </div>
             <div className="tool-actions">
+              <div className="export-scope" role="group" aria-label="导出范围">
+                <span>导出</span>
+                <button type="button" className={exportScope === 'current' ? 'active' : ''} aria-pressed={exportScope === 'current'} onClick={() => setExportScope('current')}>仅文本</button>
+                <button type="button" className={exportScope === 'full' ? 'active' : ''} aria-pressed={exportScope === 'full'} onClick={() => setExportScope('full')}>完整日志</button>
+              </div>
               <button className="icon-button" type="button" onClick={copyCurrent}>复制</button>
               <button className="icon-button" type="button" onClick={downloadCurrent}>下载 TXT</button>
               <button className="icon-button" type="button" onClick={exportPdf}>导出 PDF</button>
               <button className="icon-button" type="button" onClick={exportWord}>导出 Word</button>
+              <button className="icon-button" type="button" onClick={exportImage}>导出图片</button>
             </div>
           </div>
 
@@ -832,6 +851,109 @@ function getTabHtml(result, tab) {
   return result?.[tab] || result?.text || '';
 }
 
+function buildExportDocument({ form, result, activeTab, scope, annotatedWords, relatedWords, metrics }) {
+  const tabLabel = TAB_OPTIONS.find((item) => item.id === activeTab)?.label || '生成文本';
+  const title = scope === 'full'
+    ? `${form.topic?.trim() || '点词成文'} - 完整生成日志`
+    : `${form.topic?.trim() || '点词成文'} - ${tabLabel}`;
+  const generatedAt = new Date().toLocaleString('zh-CN', { hour12: false });
+  const outputSections = TAB_OPTIONS.map((tab) => ({
+    title: tab.label,
+    blocks: htmlToExportBlocks(getTabHtml(result, tab.id)),
+  }));
+
+  if (scope !== 'full') {
+    return {
+      title,
+      filename: sanitizeFilename(title),
+      meta: [`导出时间：${generatedAt}`, `导出范围：仅当前输出 - ${tabLabel}`],
+      sections: [{ title: tabLabel, blocks: htmlToExportBlocks(getTabHtml(result, activeTab)) }],
+    };
+  }
+
+  return {
+    title,
+    filename: sanitizeFilename(title),
+    meta: [`导出时间：${generatedAt}`, '导出范围：完整日志（输入 + 设置 + 检索 + 输出）'],
+    sections: [
+      {
+        title: '输入词汇',
+        blocks: [
+          { type: 'paragraph', text: form.inputWords || '未输入' },
+          { type: 'list', items: annotatedWords.length ? annotatedWords.map((item) => `${item.word}：${item.levelLabel}`) : ['尚未识别目标词'] },
+        ],
+      },
+      {
+        title: '生成设置',
+        blocks: [
+          { type: 'kv', items: [
+            ['主题 / 场景', form.topic || '未填写'],
+            ['文本类型', form.textType],
+            ['HSK 等级', labelFor(HSK_LEVELS, form.hskLevel)],
+            ['语体', labelFor(REGISTER_OPTIONS, form.register)],
+            ['课堂用途', form.lessonUse],
+            ['学习者语种', labelFor(LANGUAGE_OPTIONS, form.audience)],
+            ['文本长度', `约 ${form.wordCount} 字`],
+            ['问题数量', `${form.questionCount} 题`],
+            ['词汇模式', form.vocabMode === 'only_input' ? '仅用输入词' : '智能扩词'],
+            ['教学重点', form.focus],
+            ['模型', labelFor(MODEL_OPTIONS, form.model)],
+            ['语法点', form.grammar || '未填写'],
+            ['教学目标', form.goal || '未填写'],
+            ['限制要求', form.constraints || '未填写'],
+          ] },
+        ],
+      },
+      {
+        title: 'HSK 检索与适配度',
+        blocks: [
+          { type: 'kv', items: [
+            ['词汇覆盖', `${metrics.coverage}%`],
+            ['水平匹配', `${metrics.levelMatch}%`],
+            ['课堂可用', `${metrics.classroom}%`],
+            ['已收录', `${metrics.knownCount} 个`],
+            ['未收录', `${metrics.unknownCount} 个`],
+          ] },
+          { type: 'list', items: relatedWords.length ? relatedWords.map((word) => `扩展词：${word}`) : ['未启用或未匹配到扩展词'] },
+        ],
+      },
+      ...outputSections,
+    ],
+  };
+}
+
+function htmlToExportBlocks(html) {
+  const container = document.createElement('div');
+  container.innerHTML = html || '';
+  const blocks = [];
+  Array.from(container.children).forEach((child) => {
+    const text = child.innerText.replace(/\n{3,}/g, '\n\n').trim();
+    if (!text) return;
+    if (/^H[1-6]$/.test(child.tagName)) {
+      blocks.push({ type: 'heading', text });
+    } else {
+      blocks.push({ type: 'paragraph', text });
+    }
+  });
+  if (!blocks.length && container.innerText.trim()) blocks.push({ type: 'paragraph', text: container.innerText.trim() });
+  return blocks;
+}
+
+function renderExportText(exportDoc) {
+  const lines = [exportDoc.title, '='.repeat(Math.min(42, exportDoc.title.length + 8)), ...exportDoc.meta, ''];
+  exportDoc.sections.forEach((section, sectionIndex) => {
+    if (sectionIndex > 0) lines.push('');
+    lines.push(`## ${section.title}`);
+    section.blocks.forEach((block) => {
+      if (block.type === 'heading') lines.push('', `### ${block.text}`);
+      if (block.type === 'paragraph') lines.push('', ...block.text.split(/\n+/).map((line) => `　　${line.trim()}`));
+      if (block.type === 'kv') block.items.forEach(([key, value]) => lines.push(`- ${key}：${value}`));
+      if (block.type === 'list') block.items.forEach((item) => lines.push(`- ${item}`));
+    });
+  });
+  return lines.join('\n').replace(/\n{4,}/g, '\n\n\n').trim() + '\n';
+}
+
 function stripHtml(html) {
   const node = document.createElement('div');
   node.innerHTML = html;
@@ -863,41 +985,66 @@ function sanitizeFilename(value) {
     .slice(0, 80) || '点词成文';
 }
 
-function buildWordHtml(title, bodyHtml) {
+function buildWordHtml(exportDoc) {
   return `<!doctype html>
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>${escapeHtml(title)}</title>
+  <title>${escapeHtml(exportDoc.title)}</title>
   <style>
     @page { margin: 2.2cm 2cm; }
     body { font-family: "Microsoft YaHei", SimSun, serif; color: #111827; font-size: 12pt; line-height: 1.85; }
-    h1, h2 { font-family: "Microsoft YaHei", SimSun, serif; line-height: 1.25; }
-    h1 { font-size: 20pt; margin: 0 0 18pt; }
-    h2 { font-size: 18pt; margin: 0 0 14pt; }
-    p { margin: 0 0 10pt; text-indent: 2em; }
+    h1, h2, h3 { font-family: "Microsoft YaHei", SimSun, serif; line-height: 1.28; page-break-after: avoid; }
+    h1 { font-size: 20pt; margin: 0 0 10pt; }
+    h2 { font-size: 16pt; margin: 20pt 0 8pt; padding-bottom: 4pt; border-bottom: 1pt solid #e5e7eb; }
+    h3 { font-size: 13pt; margin: 12pt 0 6pt; }
+    p { margin: 0 0 9pt; text-indent: 2em; }
+    ul { margin: 0 0 10pt 1.2em; padding: 0; }
+    li { margin: 0 0 4pt; }
+    table { width: 100%; border-collapse: collapse; margin: 0 0 12pt; }
+    th, td { border: 1pt solid #e5e7eb; padding: 5pt 7pt; text-align: left; vertical-align: top; }
+    th { width: 28%; background: #f6f6f1; }
+    .meta { margin: 0 0 4pt; color: #6b7280; text-indent: 0; font-size: 10.5pt; }
+    .section { page-break-inside: avoid; }
     strong { font-weight: 700; }
-    .hsk-chip { display: inline-block; border: 1px solid #d7dce5; border-radius: 999px; padding: 2pt 6pt; background: #f6f6f1; text-indent: 0; }
-    small { color: #6b7280; }
   </style>
 </head>
 <body>
-  <h1>${escapeHtml(title)}</h1>
-  ${bodyHtml}
+  <h1>${escapeHtml(exportDoc.title)}</h1>
+  ${exportDoc.meta.map((item) => `<p class="meta">${escapeHtml(item)}</p>`).join('')}
+  ${exportDoc.sections.map((section) => `<div class="section"><h2>${escapeHtml(section.title)}</h2>${renderWordBlocks(section.blocks)}</div>`).join('')}
 </body>
 </html>`;
 }
 
-function createPdfBlob(title, text) {
+function renderWordBlocks(blocks) {
+  return blocks.map((block) => {
+    if (block.type === 'heading') return `<h3>${escapeHtml(block.text)}</h3>`;
+    if (block.type === 'paragraph') {
+      return block.text.split(/\n+/).map((line) => `<p>${escapeHtml(line.trim())}</p>`).join('');
+    }
+    if (block.type === 'kv') {
+      return `<table>${block.items.map(([key, value]) => `<tr><th>${escapeHtml(key)}</th><td>${escapeHtml(value)}</td></tr>`).join('')}</table>`;
+    }
+    if (block.type === 'list') {
+      return `<ul>${block.items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+    }
+    return '';
+  }).join('');
+}
+
+function createPdfBlob(exportDoc) {
   const pageWidth = 595.28;
   const pageHeight = 841.89;
   const margin = 56;
   const fontSize = 12;
   const titleSize = 18;
+  const sectionSize = 15;
+  const headingSize = 13;
+  const metaSize = 10;
   const lineHeight = 20;
   const titleLineHeight = 26;
   const maxWidth = pageWidth - margin * 2;
-  const content = [];
   const pages = [];
   let currentPage = [];
   let y = margin;
@@ -908,22 +1055,50 @@ function createPdfBlob(title, text) {
     y = margin;
   }
 
-  function addLine(line, size = fontSize, height = lineHeight) {
+  function addLine(line, size = fontSize, height = lineHeight, x = margin) {
     if (y + height > pageHeight - margin) newPage();
-    currentPage.push({ text: line, x: margin, y, size });
+    currentPage.push({ text: line, x, y, size });
     y += height;
   }
 
-  splitTextForPdf(title, maxWidth, titleSize).forEach((line) => addLine(line, titleSize, titleLineHeight));
+  function addWrapped(text, size = fontSize, height = lineHeight, x = margin, indentFirst = false) {
+    const width = pageWidth - margin - x;
+    splitTextForPdf(text, width, size).forEach((line, index) => {
+      addLine(index === 0 && indentFirst ? `　　${line}` : line, size, height, x);
+    });
+  }
+
+  addWrapped(exportDoc.title, titleSize, titleLineHeight);
+  y += 6;
+  exportDoc.meta.forEach((item) => addWrapped(item, metaSize, 16));
   y += 10;
-  String(text || '').split(/\n+/).forEach((paragraph) => {
-    const clean = paragraph.trim();
-    if (!clean) {
-      y += lineHeight;
-      return;
-    }
-    splitTextForPdf(clean, maxWidth, fontSize).forEach((line, index) => addLine(index === 0 ? `　　${line}` : line));
-    y += 8;
+  exportDoc.sections.forEach((section, sectionIndex) => {
+    if (sectionIndex > 0) y += 8;
+    addWrapped(section.title, sectionSize, 24);
+    y += 2;
+    section.blocks.forEach((block) => {
+      if (block.type === 'heading') {
+        y += 3;
+        addWrapped(block.text, headingSize, 21);
+        return;
+      }
+      if (block.type === 'paragraph') {
+        block.text.split(/\n+/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
+          addWrapped(line, fontSize, lineHeight, margin, true);
+          y += 4;
+        });
+        return;
+      }
+      if (block.type === 'kv') {
+        block.items.forEach(([key, value]) => addWrapped(`${key}：${value}`, fontSize, lineHeight, margin + 12));
+        y += 6;
+        return;
+      }
+      if (block.type === 'list') {
+        block.items.forEach((item) => addWrapped(`• ${item}`, fontSize, lineHeight, margin + 12));
+        y += 6;
+      }
+    });
   });
   if (currentPage.length) pages.push(currentPage);
 
@@ -969,6 +1144,117 @@ function createPdfBlob(title, text) {
   });
   pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogObject} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
   return new Blob([pdf], { type: 'application/pdf' });
+}
+
+async function createExportImageBlob(exportDoc) {
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  const scale = Math.min(2, window.devicePixelRatio || 1.5);
+  const width = 1240;
+  const padding = 72;
+  const maxWidth = width - padding * 2;
+  const drawItems = [];
+  let y = padding;
+
+  function queueText(text, font, color, lineHeight, options = {}) {
+    context.font = font;
+    const lines = splitCanvasText(context, text, maxWidth - (options.indent || 0));
+    if (options.before) y += options.before;
+    lines.forEach((line, index) => {
+      drawItems.push({ type: 'text', text: line, x: padding + (options.indent || 0), y, font, color, lineHeight, first: index === 0 });
+      y += lineHeight;
+    });
+    if (options.after) y += options.after;
+  }
+
+  function queueRule(before = 12, after = 18) {
+    y += before;
+    drawItems.push({ type: 'rule', x: padding, y, width: maxWidth });
+    y += after;
+  }
+
+  queueText(exportDoc.title, '700 34px "Microsoft YaHei", sans-serif', '#111827', 46, { after: 8 });
+  exportDoc.meta.forEach((item) => queueText(item, '400 18px "Microsoft YaHei", sans-serif', '#6b7280', 28));
+  queueRule(14, 22);
+  exportDoc.sections.forEach((section, sectionIndex) => {
+    queueText(section.title, '700 26px "Microsoft YaHei", sans-serif', '#111827', 36, { before: sectionIndex ? 18 : 0, after: 8 });
+    section.blocks.forEach((block) => {
+      if (block.type === 'heading') queueText(block.text, '700 21px "Microsoft YaHei", sans-serif', '#111827', 32, { before: 8, after: 2 });
+      if (block.type === 'paragraph') {
+        block.text.split(/\n+/).map((line) => line.trim()).filter(Boolean).forEach((line) => {
+          queueText(`　　${line}`, '400 20px "Microsoft YaHei", sans-serif', '#1f2937', 34, { after: 7 });
+        });
+      }
+      if (block.type === 'kv') {
+        block.items.forEach(([key, value]) => queueText(`${key}：${value}`, '400 19px "Microsoft YaHei", sans-serif', '#1f2937', 31, { indent: 18 }));
+        y += 8;
+      }
+      if (block.type === 'list') {
+        block.items.forEach((item) => queueText(`• ${item}`, '400 19px "Microsoft YaHei", sans-serif', '#1f2937', 31, { indent: 18 }));
+        y += 8;
+      }
+    });
+  });
+
+  const height = Math.max(900, y + padding);
+  canvas.width = Math.round(width * scale);
+  canvas.height = Math.round(height * scale);
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+  context.scale(scale, scale);
+  context.fillStyle = '#fbfaf7';
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = '#ffffff';
+  roundRect(context, 32, 32, width - 64, height - 64, 28);
+  context.fill();
+  context.strokeStyle = 'rgba(17, 24, 39, .08)';
+  context.lineWidth = 1;
+  context.stroke();
+
+  drawItems.forEach((item) => {
+    if (item.type === 'rule') {
+      context.strokeStyle = '#e5e7eb';
+      context.beginPath();
+      context.moveTo(item.x, item.y);
+      context.lineTo(item.x + item.width, item.y);
+      context.stroke();
+      return;
+    }
+    context.font = item.font;
+    context.fillStyle = item.color;
+    context.textBaseline = 'top';
+    context.fillText(item.text, item.x, item.y);
+  });
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Canvas export failed'))), 'image/png', 0.95);
+  });
+}
+
+function splitCanvasText(context, text, maxWidth) {
+  const result = [];
+  let line = '';
+  for (const char of String(text || '')) {
+    const next = line + char;
+    if (context.measureText(next).width > maxWidth && line) {
+      result.push(line);
+      line = char;
+    } else {
+      line = next;
+    }
+  }
+  if (line) result.push(line);
+  return result;
+}
+
+function roundRect(context, x, y, width, height, radius) {
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.arcTo(x + width, y, x + width, y + height, radius);
+  context.arcTo(x + width, y + height, x, y + height, radius);
+  context.arcTo(x, y + height, x, y, radius);
+  context.arcTo(x, y, x + width, y, radius);
+  context.closePath();
 }
 
 function splitTextForPdf(text, maxWidth, fontSize) {
