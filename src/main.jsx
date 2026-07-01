@@ -242,15 +242,22 @@ function App() {
 
   function downloadCurrent() {
     const blob = new Blob([getTabPlainText(visibleResult, activeTab)], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = '点词成文-生成文本.txt';
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
+    downloadBlob(blob, `${buildExportTitle(form, activeTab)}.txt`);
     setToast('文本已下载');
+  }
+
+  function exportPdf() {
+    const title = buildExportTitle(form, activeTab);
+    const blob = createPdfBlob(title, getTabPlainText(visibleResult, activeTab));
+    downloadBlob(blob, `${title}.pdf`);
+    setToast('PDF 已下载');
+  }
+
+  function exportWord() {
+    const title = buildExportTitle(form, activeTab);
+    const blob = new Blob([buildWordHtml(title, getTabHtml(visibleResult, activeTab))], { type: 'application/msword;charset=utf-8' });
+    downloadBlob(blob, `${title}.doc`);
+    setToast('Word 已下载');
   }
 
   if (!auth?.token) {
@@ -340,6 +347,8 @@ function App() {
             <div className="tool-actions">
               <button className="icon-button" type="button" onClick={copyCurrent}>复制</button>
               <button className="icon-button" type="button" onClick={downloadCurrent}>下载 TXT</button>
+              <button className="icon-button" type="button" onClick={exportPdf}>导出 PDF</button>
+              <button className="icon-button" type="button" onClick={exportWord}>导出 Word</button>
             </div>
           </div>
 
@@ -816,13 +825,195 @@ function computeMetrics(annotatedWords, hskLevel, wordCount, questionCount, hasG
 }
 
 function getTabPlainText(result, tab) {
-  return stripHtml(result?.[tab] || result?.text || '');
+  return stripHtml(getTabHtml(result, tab));
+}
+
+function getTabHtml(result, tab) {
+  return result?.[tab] || result?.text || '';
 }
 
 function stripHtml(html) {
   const node = document.createElement('div');
   node.innerHTML = html;
   return node.innerText.trim();
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function buildExportTitle(form, tab) {
+  const tabLabel = TAB_OPTIONS.find((item) => item.id === tab)?.label || '生成文本';
+  const topic = form.topic?.trim() || '点词成文';
+  return sanitizeFilename(`${topic}-${tabLabel}`);
+}
+
+function sanitizeFilename(value) {
+  return String(value || '点词成文')
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80) || '点词成文';
+}
+
+function buildWordHtml(title, bodyHtml) {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    @page { margin: 2.2cm 2cm; }
+    body { font-family: "Microsoft YaHei", SimSun, serif; color: #111827; font-size: 12pt; line-height: 1.85; }
+    h1, h2 { font-family: "Microsoft YaHei", SimSun, serif; line-height: 1.25; }
+    h1 { font-size: 20pt; margin: 0 0 18pt; }
+    h2 { font-size: 18pt; margin: 0 0 14pt; }
+    p { margin: 0 0 10pt; text-indent: 2em; }
+    strong { font-weight: 700; }
+    .hsk-chip { display: inline-block; border: 1px solid #d7dce5; border-radius: 999px; padding: 2pt 6pt; background: #f6f6f1; text-indent: 0; }
+    small { color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(title)}</h1>
+  ${bodyHtml}
+</body>
+</html>`;
+}
+
+function createPdfBlob(title, text) {
+  const pageWidth = 595.28;
+  const pageHeight = 841.89;
+  const margin = 56;
+  const fontSize = 12;
+  const titleSize = 18;
+  const lineHeight = 20;
+  const titleLineHeight = 26;
+  const maxWidth = pageWidth - margin * 2;
+  const content = [];
+  const pages = [];
+  let currentPage = [];
+  let y = margin;
+
+  function newPage() {
+    if (currentPage.length) pages.push(currentPage);
+    currentPage = [];
+    y = margin;
+  }
+
+  function addLine(line, size = fontSize, height = lineHeight) {
+    if (y + height > pageHeight - margin) newPage();
+    currentPage.push({ text: line, x: margin, y, size });
+    y += height;
+  }
+
+  splitTextForPdf(title, maxWidth, titleSize).forEach((line) => addLine(line, titleSize, titleLineHeight));
+  y += 10;
+  String(text || '').split(/\n+/).forEach((paragraph) => {
+    const clean = paragraph.trim();
+    if (!clean) {
+      y += lineHeight;
+      return;
+    }
+    splitTextForPdf(clean, maxWidth, fontSize).forEach((line, index) => addLine(index === 0 ? `　　${line}` : line));
+    y += 8;
+  });
+  if (currentPage.length) pages.push(currentPage);
+
+  const objects = [];
+  const addObject = (body) => {
+    objects.push(body);
+    return objects.length;
+  };
+
+  const fontObject = addObject('<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 2 >> >>] >>');
+  const pageRefs = [];
+
+  pages.forEach((page) => {
+    const commands = ['BT', `/F1 ${fontSize} Tf`];
+    page.forEach((line) => {
+      commands.push(`/F1 ${line.size} Tf`);
+      commands.push(`1 0 0 1 ${line.x.toFixed(2)} ${(pageHeight - line.y).toFixed(2)} Tm`);
+      commands.push(`<${toUtf16BeHex(line.text)}> Tj`);
+    });
+    commands.push('ET');
+    const stream = commands.join('\n');
+    const streamObject = addObject(`<< /Length ${byteLengthAscii(stream)} >>\nstream\n${stream}\nendstream`);
+    pageRefs.push({ streamObject });
+  });
+
+  const pagesObjectIndex = objects.length + pageRefs.length + 1;
+  pageRefs.forEach((pageRef) => {
+    pageRef.pageObject = addObject(`<< /Type /Page /Parent ${pagesObjectIndex} 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 ${fontObject} 0 R >> >> /Contents ${pageRef.streamObject} 0 R >>`);
+  });
+  const pagesObject = addObject(`<< /Type /Pages /Kids [${pageRefs.map((page) => `${page.pageObject} 0 R`).join(' ')}] /Count ${pageRefs.length} >>`);
+  const catalogObject = addObject(`<< /Type /Catalog /Pages ${pagesObject} 0 R >>`);
+
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  objects.forEach((body, index) => {
+    offsets.push(byteLengthAscii(pdf));
+    pdf += `${index + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xrefOffset = byteLengthAscii(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  offsets.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  });
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root ${catalogObject} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return new Blob([pdf], { type: 'application/pdf' });
+}
+
+function splitTextForPdf(text, maxWidth, fontSize) {
+  const result = [];
+  let line = '';
+  for (const char of String(text || '')) {
+    const next = line + char;
+    if (measurePdfText(next, fontSize) > maxWidth && line) {
+      result.push(line);
+      line = char;
+    } else {
+      line = next;
+    }
+  }
+  if (line) result.push(line);
+  return result;
+}
+
+function measurePdfText(text, fontSize) {
+  let units = 0;
+  for (const char of String(text || '')) {
+    units += /[\u0000-\u00ff]/.test(char) ? 0.55 : 1;
+  }
+  return units * fontSize;
+}
+
+function toUtf16BeHex(text) {
+  const bytes = [];
+  for (const char of String(text || '')) {
+    const code = char.codePointAt(0);
+    if (code > 0xffff) {
+      const normalized = Array.from(char);
+      normalized.forEach((part) => {
+        const partCode = part.charCodeAt(0);
+        bytes.push((partCode >> 8) & 0xff, partCode & 0xff);
+      });
+    } else {
+      bytes.push((code >> 8) & 0xff, code & 0xff);
+    }
+  }
+  return bytes.map((byte) => byte.toString(16).padStart(2, '0')).join('').toUpperCase();
+}
+
+function byteLengthAscii(value) {
+  return new TextEncoder().encode(value).length;
 }
 
 function purposeFromTextType(type) {
