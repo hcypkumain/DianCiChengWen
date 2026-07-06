@@ -178,7 +178,7 @@ function App() {
           <span className="input-hint">换行、空格、逗号、分号、顿号均可</span>
         </div>
         <div className="input-box-wrap">
-          <textarea className="word-input" value={state.inputWords} maxLength={2000} placeholder="例如：消防车 轮胎 加速 刹车 停车场 或直接粘贴词汇列表……词汇未必需要展现直接相关性，可随意输入" onChange={(event) => setState((prev) => ({ ...prev, inputWords: event.target.value }))} />
+          <textarea className="word-input" value={state.inputWords} maxLength={2000} placeholder="例如：这里的词汇可随意输入" onChange={(event) => setState((prev) => ({ ...prev, inputWords: event.target.value }))} />
           {state.inputWords && <button className="clear-btn" onClick={() => setState((prev) => ({ ...prev, inputWords: '' }))}>×</button>}
         </div>
       </section>
